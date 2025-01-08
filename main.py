@@ -51,6 +51,26 @@ def recommend_posts(request: RecommendationRequest):
         # Handle errors gracefully
         raise HTTPException(status_code=500, detail=str(e))
     
+@app.post("/Goexplore")
+def collaborative(request:RecommendationRequest):
+    user_id=request.user_id
+    num_recommendations=request.num_recommendations
+
+    try:
+        # Use the TravelRecommender's recommend method
+        recommendations = recommender.get_collaborative_recommendations(user_id, num_recommendations)
+
+        # Check if recommendations are empty
+        if not recommendations:
+            raise HTTPException(status_code=404, detail="No recommendations found.")
+
+        return {"user_id": user_id, "recommendations": recommendations}
+
+    except Exception as e:
+        # Handle errors gracefully
+        raise HTTPException(status_code=500, detail=str(e))
+
+    
 @app.post("/trending_posts")
 def recommend_trending(request:TrendingRecommendationsRequest):
     n_recommedations=request.num_recommendations
