@@ -155,6 +155,7 @@ class TrendingRecommendationsRequest(BaseModel):
         le=50, 
         description="Number of trending recommendations to return"
     )
+    detailed_response:bool =False
 
 class AddInteraction(BaseModel):
     user_id: int = Field(..., description="User ID performing the interaction")
@@ -222,7 +223,36 @@ async def recommend_posts(request: RecommendationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@app.post("/explore",  # Changed from "Goexplore" for consistency
+# @app.post("/explore",  # Changed from "Goexplore" for consistency
+#           response_model_exclude_none=True,
+#           summary="Get collaborative recommendations")
+# async def get_collaborative_recommendations(request: RecommendationRequest):
+#     """Get recommendations based on collaborative filtering only"""
+#     try:
+#         recommendations = recommender.get_collaborative_recommendations(
+#             user_id=request.user_id,
+#             n_recommendations=request.num_recommendations,
+#             detailed_respons=request.detailed_response
+#         )
+
+#         if not recommendations:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"No collaborative recommendations found for user {request.user_id}"
+#             )
+
+#         return {
+#             "user_id": request.user_id,
+#             "num_recommendations": len(recommendations),
+#             "recommendations": recommendations
+#         }
+#     except ValueError as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/explore",
           response_model_exclude_none=True,
           summary="Get collaborative recommendations")
 async def get_collaborative_recommendations(request: RecommendationRequest):
@@ -230,7 +260,8 @@ async def get_collaborative_recommendations(request: RecommendationRequest):
     try:
         recommendations = recommender.get_collaborative_recommendations(
             user_id=request.user_id,
-            n_recommendations=request.num_recommendations
+            n_recommendations=request.num_recommendations,
+            detailed_response=request.detailed_response  # Fixed typo from 'detailed_respons'
         )
 
         if not recommendations:
@@ -256,7 +287,8 @@ async def get_trending_posts(request: TrendingRecommendationsRequest):
     """Get current trending posts based on popularity and recency"""
     try:
         recommendations = recommender.get_popular_recommendations(
-            n_recommendations=request.num_recommendations
+            n_recommendations=request.num_recommendations,
+            detailed_response=request.detailed_response
         )
 
         if not recommendations:

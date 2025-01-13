@@ -450,9 +450,103 @@ class TravelRecommender:
             self.logger.error(f"Error in content-based recommendations: {str(e)}")
             return self.get_popular_recommendations(n_recommendations)
 
-    def get_collaborative_recommendations(self, user_id: int, n_recommendations: int = 5) -> List[Dict]:
-        """Get collaborative recommendations with caching"""
-        cache_key = self._get_cache_key('collab_recs', f"{user_id}:{n_recommendations}")
+    # def get_collaborative_recommendations(self, user_id: int, n_recommendations: int = 5) -> List[Dict]:
+    #     """Get collaborative recommendations with caching"""
+    #     cache_key = self._get_cache_key('collab_recs', f"{user_id}:{n_recommendations}")
+    #     cached_data = self._cache_get(cache_key)
+        
+    #     if cached_data:
+    #         try:
+    #             return json.loads(cached_data)
+    #         except json.JSONDecodeError:
+    #             self.logger.error("Error decoding cached collaborative recommendations")
+        
+    #     try:
+    #         user_idx = self.get_user_matrix_index(user_id)
+    #         user_similarity = cosine_similarity([self.user_item_matrix[user_idx]], self.user_item_matrix)[0]
+    #         similar_users = np.argsort(user_similarity)[::-1]
+    #         similar_users = [u for u in similar_users if u != user_idx][:5]
+            
+    #         if not similar_users:
+    #             recommendations = self.get_popular_recommendations(n_recommendations)
+    #         else:
+    #             similar_user_posts = defaultdict(float)
+                
+    #             for sim_user_idx in similar_users:
+    #                 sim_score = user_similarity[sim_user_idx]
+    #                 user_ratings = self.user_item_matrix[sim_user_idx]
+                    
+    #                 for post_idx, rating in enumerate(user_ratings):
+    #                     if rating > 0 and post_idx < len(self.post_features):
+    #                         post_date = pd.to_datetime(self.post_features.iloc[post_idx]['created_at'])
+    #                         if isinstance(post_date, str):
+    #                             post_date = pd.to_datetime(post_date)
+    #                         if post_date.tzinfo is not None:
+    #                             post_date = post_date.tz_localize(None)
+                                
+    #                         recency_score = self.calculate_recency_score(post_date)
+                            
+    #                         combined_score = (
+    #                             (sim_score * 0.4) +
+    #                             (rating * 0.3) +
+    #                             (recency_score * 0.3)
+    #                         )
+                            
+    #                         similar_user_posts[post_idx] += combined_score
+                
+    #             recommendations = []
+    #             seen_posts = set()
+                
+    #             for post_idx, score in sorted(similar_user_posts.items(), key=lambda x: x[1], reverse=True):
+    #                 if len(recommendations) >= n_recommendations:
+    #                     break
+                        
+    #                 if self.user_item_matrix[user_idx][post_idx] > 0:
+    #                     continue
+                        
+    #                 post_id = int(self.post_features.iloc[post_idx]['post_id'])
+    #                 if post_id in seen_posts:
+    #                     continue
+                        
+    #                 seen_posts.add(post_id)
+    #                 post_date = pd.to_datetime(self.post_features.iloc[post_idx]['created_at'])
+                    
+    #                 if isinstance(post_date, str):
+    #                     post_date = pd.to_datetime(post_date)
+    #                 if post_date.tzinfo is not None:
+    #                     post_date = post_date.tz_localize(None)
+                        
+    #                 recency_score = self.calculate_recency_score(post_date)
+                    
+    #                 recommendations.append({
+    #                     'post_id': post_id,
+    #                     'score': float(score),
+    #                     'type': 'collaborative',
+    #                     'recency_score': float(recency_score)
+    #                 })
+            
+    #         # Cache the recommendations
+    #         self._cache_set(cache_key, json.dumps(recommendations).encode())
+    #         return recommendations
+            
+    #     except Exception as e:
+    #         self.logger.error(f"Error in collaborative recommendations: {str(e)}")
+    #         return self.get_popular_recommendations(n_recommendations)
+
+
+    def get_collaborative_recommendations(self, user_id: int, n_recommendations: int = 5, detailed_response: bool = True) -> Union[List[int], List[Dict]]:
+        """
+        Get collaborative recommendations with caching
+        
+        Parameters:
+        - user_id (int): The ID of the user to get recommendations for
+        - n_recommendations (int): Number of recommendations to return
+        - detailed_response (bool): If True, return detailed dictionaries; if False, return list of post IDs
+        
+        Returns:
+        - Union[List[int], List[Dict]]: Either a list of post IDs or detailed recommendation dictionaries
+        """
+        cache_key = self._get_cache_key('collab_recs', f"{user_id}:{n_recommendations}:{detailed_response}")
         cached_data = self._cache_get(cache_key)
         
         if cached_data:
@@ -468,85 +562,321 @@ class TravelRecommender:
             similar_users = [u for u in similar_users if u != user_idx][:5]
             
             if not similar_users:
-                recommendations = self.get_popular_recommendations(n_recommendations)
-            else:
-                similar_user_posts = defaultdict(float)
+                # Get popular recommendations as fallback
+                popular_recs = self.get_popular_recommendations(n_recommendations)
+                if not detailed_response:
+                    return [rec['post_id'] for rec in popular_recs]
+                return popular_recs
+            
+            similar_user_posts = defaultdict(float)
+            
+            # Calculate similarity scores for posts
+            for sim_user_idx in similar_users:
+                sim_score = user_similarity[sim_user_idx]
+                user_ratings = self.user_item_matrix[sim_user_idx]
                 
-                for sim_user_idx in similar_users:
-                    sim_score = user_similarity[sim_user_idx]
-                    user_ratings = self.user_item_matrix[sim_user_idx]
-                    
-                    for post_idx, rating in enumerate(user_ratings):
-                        if rating > 0 and post_idx < len(self.post_features):
-                            post_date = pd.to_datetime(self.post_features.iloc[post_idx]['created_at'])
-                            if isinstance(post_date, str):
-                                post_date = pd.to_datetime(post_date)
-                            if post_date.tzinfo is not None:
-                                post_date = post_date.tz_localize(None)
-                                
-                            recency_score = self.calculate_recency_score(post_date)
+                for post_idx, rating in enumerate(user_ratings):
+                    if rating > 0 and post_idx < len(self.post_features):
+                        post_date = pd.to_datetime(self.post_features.iloc[post_idx]['created_at'])
+                        if isinstance(post_date, str):
+                            post_date = pd.to_datetime(post_date)
+                        if post_date.tzinfo is not None:
+                            post_date = post_date.tz_localize(None)
                             
-                            combined_score = (
-                                (sim_score * 0.4) +
-                                (rating * 0.3) +
-                                (recency_score * 0.3)
-                            )
-                            
-                            similar_user_posts[post_idx] += combined_score
-                
-                recommendations = []
-                seen_posts = set()
-                
-                for post_idx, score in sorted(similar_user_posts.items(), key=lambda x: x[1], reverse=True):
-                    if len(recommendations) >= n_recommendations:
-                        break
+                        recency_score = self.calculate_recency_score(post_date)
                         
-                    if self.user_item_matrix[user_idx][post_idx] > 0:
-                        continue
+                        combined_score = (
+                            (sim_score * 0.4) +
+                            (rating * 0.3) +
+                            (recency_score * 0.3)
+                        )
                         
-                    post_id = int(self.post_features.iloc[post_idx]['post_id'])
-                    if post_id in seen_posts:
-                        continue
-                        
-                    seen_posts.add(post_id)
-                    post_date = pd.to_datetime(self.post_features.iloc[post_idx]['created_at'])
+                        similar_user_posts[post_idx] += combined_score
+            
+            # Get top recommendations
+            recommendations = []
+            detailed_recommendations = []
+            seen_posts = set()
+            
+            for post_idx, score in sorted(similar_user_posts.items(), key=lambda x: x[1], reverse=True):
+                if len(recommendations) >= n_recommendations:
+                    break
                     
-                    if isinstance(post_date, str):
-                        post_date = pd.to_datetime(post_date)
-                    if post_date.tzinfo is not None:
-                        post_date = post_date.tz_localize(None)
-                        
-                    recency_score = self.calculate_recency_score(post_date)
+                if self.user_item_matrix[user_idx][post_idx] > 0:
+                    continue
                     
-                    recommendations.append({
-                        'post_id': post_id,
-                        'score': float(score),
-                        'type': 'collaborative',
-                        'recency_score': float(recency_score)
-                    })
+                post_id = int(self.post_features.iloc[post_idx]['post_id'])
+                if post_id in seen_posts:
+                    continue
+                    
+                seen_posts.add(post_id)
+                recommendations.append(post_id)
+                
+                # Create detailed recommendation if needed
+                post_date = pd.to_datetime(self.post_features.iloc[post_idx]['created_at'])
+                if isinstance(post_date, str):
+                    post_date = pd.to_datetime(post_date)
+                if post_date.tzinfo is not None:
+                    post_date = post_date.tz_localize(None)
+                    
+                recency_score = self.calculate_recency_score(post_date)
+                
+                detailed_recommendations.append({
+                    'post_id': post_id,
+                    'score': float(score),
+                    'type': 'collaborative',
+                    'recency_score': float(recency_score)
+                })
+            
+            # Return appropriate format based on detailed_response parameter
+            final_recommendations = detailed_recommendations if detailed_response else recommendations
             
             # Cache the recommendations
-            self._cache_set(cache_key, json.dumps(recommendations).encode())
-            return recommendations
+            self._cache_set(cache_key, json.dumps(final_recommendations).encode())
+            return final_recommendations
             
         except Exception as e:
             self.logger.error(f"Error in collaborative recommendations: {str(e)}")
-            return self.get_popular_recommendations(n_recommendations)
+            # Get popular recommendations as fallback
+            popular_recs = self.get_popular_recommendations(n_recommendations)
+            if not detailed_response:
+                return [rec['post_id'] for rec in popular_recs]
+            return popular_recs
+            
+    # def get_popular_recommendations(self, n_recommendations: int = 5) -> List[Dict]:
+    #     """
+    #     Get popular posts with recency factor and caching
         
-    def get_popular_recommendations(self, n_recommendations: int = 5) -> List[Dict]:
+    #     Parameters:
+    #     - n_recommendations: Number of recommendations to return
+        
+    #     Returns:
+    #     - List of dictionaries containing post recommendations
+    #     """
+    #     # Generate cache key
+    #     cache_key = self._get_cache_key('popular_recs', f"{n_recommendations}")
+        
+    #     # Try to get cached recommendations
+    #     cached_data = self._cache_get(cache_key)
+    #     if cached_data:
+    #         try:
+    #             return json.loads(cached_data)
+    #         except json.JSONDecodeError:
+    #             self.logger.error("Error decoding cached popular recommendations")
+        
+    #     try:
+    #         # Calculate base popularity scores from user-item matrix
+    #         popularity_scores = np.sum(self.user_item_matrix, axis=0)
+            
+    #         # Cache popularity scores with a longer TTL since they change less frequently
+    #         pop_scores_key = 'popularity_scores'
+    #         self._cache_set(pop_scores_key, self._serialize_numpy(popularity_scores), self.long_ttl)
+            
+    #         # Calculate or get cached recency scores
+    #         recency_scores = []
+    #         for i in range(len(popularity_scores)):
+    #             post_date = pd.to_datetime(self.post_features.iloc[i]['created_at'])
+                
+    #             # Generate cache key for recency score
+    #             recency_key = self._get_cache_key('post_recency', f"{self.post_features.iloc[i]['post_id']}")
+    #             cached_recency = self._cache_get(recency_key)
+                
+    #             if cached_recency:
+    #                 recency_score = float(cached_recency)
+    #             else:
+    #                 recency_score = self.calculate_recency_score(post_date)
+    #                 # Cache individual recency scores
+    #                 self._cache_set(recency_key, str(recency_score).encode())
+                    
+    #             recency_scores.append(recency_score)
+            
+    #         recency_scores = np.array(recency_scores)
+    #         print(f"this is recency scoe{recency_scores}")
+            
+    #         # Calculate weighted scores
+    #         popularity_weight = 0.7
+    #         recency_weight = 0.3
+            
+    #         # Normalize popularity scores
+    #         if popularity_scores.max() != popularity_scores.min():
+    #             normalized_popularity = (popularity_scores - popularity_scores.min()) / \
+    #                                  (popularity_scores.max() - popularity_scores.min())
+    #         else:
+    #             normalized_popularity = np.ones_like(popularity_scores)
+            
+    #         # Calculate final scores
+    #         final_scores = (normalized_popularity * popularity_weight) + \
+    #                       (recency_scores * recency_weight)
+            
+    #         # Get top posts
+    #         top_posts = np.argsort(final_scores)[::-1][:n_recommendations]
+            
+    #         # Prepare recommendations
+    #         recommendations = []
+            
+    #         for i in top_posts:
+    #             try:
+    #                 rec = {
+    #                     'post_id': int(self.post_features.iloc[i]['post_id']),
+    #                     'score': float(final_scores[i]),
+    #                     'type': 'popular',
+    #                     'recency_score': float(recency_scores[i]),
+    #                     'popularity_score': float(normalized_popularity[i])
+    #                 }
+    #                 recommendations.append(rec)
+    #             except (IndexError, KeyError) as e:
+    #                 self.logger.error(f"Error processing post at index {i}: {str(e)}")
+    #                 continue
+            
+    #         # Cache the final recommendations
+    #         if recommendations:
+    #             self._cache_set(cache_key, json.dumps(recommendations).encode())
+    #         print(f"this is trendind recomenction{recommendations}")
+            
+    #         return recommendations
+            
+    #     except Exception as e:
+    #         self.logger.error(f"Error getting popular recommendations: {str(e)}")
+    #         return []
+
+
+    # def get_popular_recommendations(self, n_recommendations: int = 5) -> List[Dict]:
+    #     """
+    #     Get popular posts with recency factor and caching, with proper bounds checking
+        
+    #     Parameters:
+    #     - n_recommendations: Number of recommendations to return
+        
+    #     Returns:
+    #     - List of dictionaries containing post recommendations
+    #     """
+    #     cache_key = self._get_cache_key('popular_recs', f"{n_recommendations}")
+        
+    #     cached_data = self._cache_get(cache_key)
+    #     if cached_data:
+    #         try:
+    #             return json.loads(cached_data)
+    #         except json.JSONDecodeError:
+    #             self.logger.error("Error decoding cached popular recommendations")
+        
+    #     try:
+    #         # Verify that we have valid data to work with
+    #         if self.user_item_matrix is None or len(self.user_item_matrix) == 0:
+    #             self.logger.error("User-item matrix is empty or None")
+    #             return []
+                
+    #         if self.post_features is None or len(self.post_features) == 0:
+    #             self.logger.error("Post features dataframe is empty or None")
+    #             return []
+            
+    #         # Calculate base popularity scores from user-item matrix
+    #         popularity_scores = np.sum(self.user_item_matrix, axis=0)
+            
+    #         # Ensure popularity_scores doesn't exceed post_features length
+    #         if len(popularity_scores) > len(self.post_features):
+    #             self.logger.warning("Truncating popularity scores to match post features length")
+    #             popularity_scores = popularity_scores[:len(self.post_features)]
+            
+    #         # Cache popularity scores
+    #         pop_scores_key = 'popularity_scores'
+    #         self._cache_set(pop_scores_key, self._serialize_numpy(popularity_scores), self.long_ttl)
+            
+    #         # Calculate recency scores with bounds checking
+    #         recency_scores = []
+    #         valid_indices = []
+            
+    #         for i in range(len(popularity_scores)):
+    #             try:
+    #                 if i >= len(self.post_features):
+    #                     break
+                        
+    #                 post_date = pd.to_datetime(self.post_features.iloc[i]['created_at'])
+    #                 recency_key = self._get_cache_key('post_recency', f"{self.post_features.iloc[i]['post_id']}")
+    #                 cached_recency = self._cache_get(recency_key)
+                    
+    #                 if cached_recency:
+    #                     recency_score = float(cached_recency)
+    #                 else:
+    #                     recency_score = self.calculate_recency_score(post_date)
+    #                     self._cache_set(recency_key, str(recency_score).encode())
+                    
+    #                 recency_scores.append(recency_score)
+    #                 valid_indices.append(i)
+                    
+    #             except (KeyError, IndexError, ValueError) as e:
+    #                 self.logger.warning(f"Skipping post at index {i} due to error: {str(e)}")
+    #                 continue
+            
+    #         if not recency_scores:
+    #             self.logger.error("No valid posts found for recommendations")
+    #             return []
+            
+    #         # Convert to numpy arrays and ensure matching lengths
+    #         recency_scores = np.array(recency_scores)
+    #         popularity_subset = popularity_scores[valid_indices]
+            
+    #         # Calculate weighted scores
+    #         popularity_weight = 0.7
+    #         recency_weight = 0.3
+            
+    #         # Normalize popularity scores
+    #         if len(popularity_subset) > 0 and popularity_subset.max() != popularity_subset.min():
+    #             normalized_popularity = (popularity_subset - popularity_subset.min()) / \
+    #                                 (popularity_subset.max() - popularity_subset.min())
+    #         else:
+    #             normalized_popularity = np.ones_like(popularity_subset)
+            
+    #         # Calculate final scores
+    #         final_scores = (normalized_popularity * popularity_weight) + \
+    #                     (recency_scores * recency_weight)
+            
+    #         # Get top posts (ensuring we don't exceed array bounds)
+    #         n_available = min(n_recommendations, len(valid_indices))
+    #         top_indices = np.argsort(final_scores)[::-1][:n_available]
+            
+    #         # Prepare recommendations
+    #         recommendations = []
+            
+    #         for rank, score_idx in enumerate(top_indices):
+    #             try:
+    #                 post_idx = valid_indices[score_idx]
+    #                 rec = {
+    #                     'post_id': int(self.post_features.iloc[post_idx]['post_id']),
+    #                     'score': float(final_scores[score_idx]),
+    #                     'type': 'popular',
+    #                     'recency_score': float(recency_scores[score_idx]),
+    #                     'popularity_score': float(normalized_popularity[score_idx]),
+    #                     'rank': rank + 1
+    #                 }
+    #                 recommendations.append(rec)
+    #             except (IndexError, KeyError) as e:
+    #                 self.logger.error(f"Error processing post at score index {score_idx}: {str(e)}")
+    #                 continue
+            
+    #         # Cache the final recommendations
+    #         if recommendations:
+    #             self._cache_set(cache_key, json.dumps(recommendations).encode())
+            
+    #         return recommendations
+            
+    #     except Exception as e:
+    #         self.logger.error(f"Error getting popular recommendations: {str(e)}")
+    #         return []
+
+
+    def get_popular_recommendations(self, n_recommendations: int = 5, detailed_response: bool = True) -> Union[List[int], List[Dict]]:
         """
-        Get popular posts with recency factor and caching
+        Get popular posts with recency factor and caching, with proper bounds checking
         
         Parameters:
         - n_recommendations: Number of recommendations to return
+        - detailed_response: If True, return detailed dictionaries; if False, return list of post IDs
         
         Returns:
-        - List of dictionaries containing post recommendations
+        - Union[List[int], List[Dict]]: Either a list of post IDs or detailed recommendation dictionaries
         """
-        # Generate cache key
-        cache_key = self._get_cache_key('popular_recs', f"{n_recommendations}")
+        cache_key = self._get_cache_key('popular_recs', f"{n_recommendations}:{detailed_response}")
         
-        # Try to get cached recommendations
         cached_data = self._cache_get(cache_key)
         if cached_data:
             try:
@@ -555,66 +885,104 @@ class TravelRecommender:
                 self.logger.error("Error decoding cached popular recommendations")
         
         try:
+            # Verify that we have valid data to work with
+            if self.user_item_matrix is None or len(self.user_item_matrix) == 0:
+                self.logger.error("User-item matrix is empty or None")
+                return [] if detailed_response else []
+                
+            if self.post_features is None or len(self.post_features) == 0:
+                self.logger.error("Post features dataframe is empty or None")
+                return [] if detailed_response else []
+            
             # Calculate base popularity scores from user-item matrix
             popularity_scores = np.sum(self.user_item_matrix, axis=0)
             
-            # Cache popularity scores with a longer TTL since they change less frequently
+            # Ensure popularity_scores doesn't exceed post_features length
+            if len(popularity_scores) > len(self.post_features):
+                self.logger.warning("Truncating popularity scores to match post features length")
+                popularity_scores = popularity_scores[:len(self.post_features)]
+            
+            # Cache popularity scores
             pop_scores_key = 'popularity_scores'
             self._cache_set(pop_scores_key, self._serialize_numpy(popularity_scores), self.long_ttl)
             
-            # Calculate or get cached recency scores
+            # Calculate recency scores with bounds checking
             recency_scores = []
-            for i in range(len(popularity_scores)):
-                post_date = pd.to_datetime(self.post_features.iloc[i]['created_at'])
-                
-                # Generate cache key for recency score
-                recency_key = self._get_cache_key('post_recency', f"{self.post_features.iloc[i]['post_id']}")
-                cached_recency = self._cache_get(recency_key)
-                
-                if cached_recency:
-                    recency_score = float(cached_recency)
-                else:
-                    recency_score = self.calculate_recency_score(post_date)
-                    # Cache individual recency scores
-                    self._cache_set(recency_key, str(recency_score).encode())
-                    
-                recency_scores.append(recency_score)
+            valid_indices = []
+            post_ids = []  # Store post IDs for non-detailed response
             
+            for i in range(len(popularity_scores)):
+                try:
+                    if i >= len(self.post_features):
+                        break
+                        
+                    post_date = pd.to_datetime(self.post_features.iloc[i]['created_at'])
+                    post_id = int(self.post_features.iloc[i]['post_id'])
+                    recency_key = self._get_cache_key('post_recency', f"{post_id}")
+                    cached_recency = self._cache_get(recency_key)
+                    
+                    if cached_recency:
+                        recency_score = float(cached_recency)
+                    else:
+                        recency_score = self.calculate_recency_score(post_date)
+                        self._cache_set(recency_key, str(recency_score).encode())
+                    
+                    recency_scores.append(recency_score)
+                    valid_indices.append(i)
+                    post_ids.append(post_id)
+                    
+                except (KeyError, IndexError, ValueError) as e:
+                    self.logger.warning(f"Skipping post at index {i} due to error: {str(e)}")
+                    continue
+            
+            if not recency_scores:
+                self.logger.error("No valid posts found for recommendations")
+                return [] if detailed_response else []
+            
+            # Convert to numpy arrays and ensure matching lengths
             recency_scores = np.array(recency_scores)
+            popularity_subset = popularity_scores[valid_indices]
             
             # Calculate weighted scores
             popularity_weight = 0.7
             recency_weight = 0.3
             
             # Normalize popularity scores
-            if popularity_scores.max() != popularity_scores.min():
-                normalized_popularity = (popularity_scores - popularity_scores.min()) / \
-                                     (popularity_scores.max() - popularity_scores.min())
+            if len(popularity_subset) > 0 and popularity_subset.max() != popularity_subset.min():
+                normalized_popularity = (popularity_subset - popularity_subset.min()) / \
+                                    (popularity_subset.max() - popularity_subset.min())
             else:
-                normalized_popularity = np.ones_like(popularity_scores)
+                normalized_popularity = np.ones_like(popularity_subset)
             
             # Calculate final scores
             final_scores = (normalized_popularity * popularity_weight) + \
-                          (recency_scores * recency_weight)
+                        (recency_scores * recency_weight)
             
-            # Get top posts
-            top_posts = np.argsort(final_scores)[::-1][:n_recommendations]
+            # Get top posts (ensuring we don't exceed array bounds)
+            n_available = min(n_recommendations, len(valid_indices))
+            top_indices = np.argsort(final_scores)[::-1][:n_available]
             
-            # Prepare recommendations
-            recommendations = []
-            for i in top_posts:
-                try:
-                    rec = {
-                        'post_id': int(self.post_features.iloc[i]['post_id']),
-                        'score': float(final_scores[i]),
-                        'type': 'popular',
-                        'recency_score': float(recency_scores[i]),
-                        'popularity_score': float(normalized_popularity[i])
-                    }
-                    recommendations.append(rec)
-                except (IndexError, KeyError) as e:
-                    self.logger.error(f"Error processing post at index {i}: {str(e)}")
-                    continue
+            if detailed_response:
+                # Prepare detailed recommendations
+                recommendations = []
+                for rank, score_idx in enumerate(top_indices):
+                    try:
+                        post_idx = valid_indices[score_idx]
+                        rec = {
+                            'post_id': int(self.post_features.iloc[post_idx]['post_id']),
+                            'score': float(final_scores[score_idx]),
+                            'type': 'popular',
+                            'recency_score': float(recency_scores[score_idx]),
+                            'popularity_score': float(normalized_popularity[score_idx]),
+                            'rank': rank + 1
+                        }
+                        recommendations.append(rec)
+                    except (IndexError, KeyError) as e:
+                        self.logger.error(f"Error processing post at score index {score_idx}: {str(e)}")
+                        continue
+            else:
+                # Return just the post IDs in ranked order
+                recommendations = [post_ids[score_idx] for score_idx in top_indices]
             
             # Cache the final recommendations
             if recommendations:
@@ -624,7 +992,7 @@ class TravelRecommender:
             
         except Exception as e:
             self.logger.error(f"Error getting popular recommendations: {str(e)}")
-            return []
+            return [] if detailed_response else []
 
     # Note: The rest of the methods (calculate_recency_score, get_popular_recommendations, etc.)
     # remain the same as they are either helper methods or less frequently called
